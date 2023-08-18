@@ -1,0 +1,7 @@
+{
+    "name": "MkvScripts",
+    "build": {
+        "context": "..",
+        "dockerfile": "../Dockerfile"
+    }
+}
