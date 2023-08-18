@@ -10,8 +10,15 @@ WORKDIR /home/MkvScripts
 # Update and install dependencies
 RUN apt-get update
 
-# Install mkvtoolnix
-RUN apt-get install -y mkvtoolnix
+# Install mkvtoolnix and openssh-server
+RUN apt-get install -y mkvtoolnix openssh-server
+
+# Setup OpenSSH Server
+RUN mkdir /var/run/sshd
+RUN echo 'root:root' | chpasswd
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+RUN sed -i 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' /etc/pam.d/sshd
+EXPOSE 22
 
 # set entrypoint
-CMD ["bash"]
+CMD ["/usr/sbin/sshd", "-D"]
