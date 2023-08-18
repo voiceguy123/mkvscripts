@@ -20,5 +20,8 @@ RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/
 RUN sed -i 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' /etc/pam.d/sshd
 EXPOSE 22
 
+# Setup Volume
+VOLUME /storage
+
 # set entrypoint
 CMD ["/usr/sbin/sshd", "-D"]
