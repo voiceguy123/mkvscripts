@@ -11,7 +11,7 @@ WORKDIR /home/MkvScripts
 RUN apt-get update
 
 # Install mkvtoolnix and openssh-server
-RUN apt-get install -y mkvtoolnix openssh-server
+RUN apt-get install -y mkvtoolnix openssh-server git python3-pip
 
 # Setup OpenSSH Server
 RUN mkdir /var/run/sshd
@@ -21,7 +21,7 @@ RUN sed -i 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid
 EXPOSE 22
 
 # Setup Volume
-VOLUME /storage
+VOLUME ["/storage"]
 
 # set entrypoint
 CMD ["/usr/sbin/sshd", "-D"]
