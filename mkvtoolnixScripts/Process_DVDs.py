@@ -23,6 +23,12 @@ mkvtoolnix = '/usr/bin/'
 # Search location
 search_dir = '/storage/Output/DVD'
 
+# Destination location for movies
+dest_dir = '/storage/Media_DVD_Movies'
+
+# Destination location for TV shows
+dest_dir_tv = '/storage/Media_DVD_Series'
+
 # Seach through list of files and remove any that are not .mkv and any that are still being written to
 # by comparing the file size to the size of the file 30 seconds ago
 potential_files = []
@@ -50,32 +56,36 @@ for file in file_list:
     output = json.loads(mediainfo.stdout.read().decode('utf-8'))
     ### Subtitle section ###
     # Search output for S_VOBSUB tracks
-    if re.search('S_VOBSUB', output):
-        # Search output for "Default track" and "Forced display"
-        if re.search('Default track', output) and re.search('Forced display', output):
-            # print(output)
-            # Run mkvpropedit to remove forced flags
-            print('Forced subtitles found: ' + file)
-            mkvpropedit_subtitles = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'track:s1', '--set', 'flag-forced=0', '--set', 'flag-default=0'], stdout=subprocess.PIPE)
-            # Wait for mkvpropedit to finish
-            mkvpropedit_subtitles.wait()
-            # # Read output from mkvpropedit and convert from bytes to string
-            mkvpropedit_subtitles_output = mkvpropedit_subtitles.stdout.read().decode('utf-8')
-            if 'Done.' in mkvpropedit_subtitles_output:
-                print('Done.')
-            else:
-                print('Error: ' + mkvpropedit_subtitles_output)
+    for track in output['media']['track']:
+        if track['@type'] == 'Text' and track['CodecID'] == 'S_VOBSUB':
+            # Determine if current subtitle track is the default track and forced display
+            if track['Default'] == 'Yes' and track['Forced'] == 'Yes':
+                # print(output)
+                # Run mkvpropedit to remove forced flags
+                print('Forced subtitles found: ' + file)
+                # Use track number instead of track name from mediainfo, track number is more reliable
+                mkvpropedit_subtitles = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'track:' + track['ID'], '--set', 'flag-forced=0', '--set', 'flag-default=0'], stdout=subprocess.PIPE)
+                # Wait for mkvpropedit to finish
+                mkvpropedit_subtitles.wait()
+                # # Read output from mkvpropedit and convert from bytes to string
+                mkvpropedit_subtitles_output = mkvpropedit_subtitles.stdout.read().decode('utf-8')
+                if 'Done.' in mkvpropedit_subtitles_output:
+                    print('Done.')
+                else:
+                    print('Error: ' + mkvpropedit_subtitles_output)
     ### Title section ###
     # Determine if file is a movie or a TV show by looking for the pattern SxxExx to determine full title
     if re.search('S\d\dE\d\d', file):
         # Split file name into parts on ' - ' and remove extension, save 1st and 3rd parts as Show: Episode Name
         # Set title
         title = file.split(' - ')[0] + ': ' + file.split(' - ')[2].split('.')[0]
+        is_tv = True
     else:
         # Split file name into parts on ' - ' and remove extension, save 1st part as title
         title = file.split(' - ')[0].split('.')[0]
+        is_tv = False
     # Determine if Title property exists and is correct
-    if re.search('Title: ' + title, output):
+    if 'Title' in output['media']['track'][0] and output['media']['track'][0]['Title'] == title:
         pass
     else:
         print('Setting title: ' + file)
@@ -90,59 +100,62 @@ for file in file_list:
         else:
             print('Error: ' + mkvpropedit_title_output)
     ### Audio Track section ###
-    # Search output for audio tracks by parsing the output of mkvinfo line by line starting with "+ Tracks"
-    # If line begins with "| + Track" add to a list for the current track
-    # Break out of the loop when reaching either "| + Track" or "|+ Tags" as these are the next sections
-    # Loop through list of tracks
-    for line in output:
-        # Look for line that is the start of the Tracks section "| + Tracks"
-        if re.search('\| \+ Tracks', line):
-            # Create list for current track
-            track = []
-            # Loop through lines until reaching either "| + Track" or "|+ Tags" as these are the next sections
-            while not re.search('\| \+ Track', line) or not re.search('\| \+ Tags', line):
-                # Add line to list for current track
-                track.append(line)
-                # Read next line from output
-                line = next(output)
-            # Check if current track is an audio track before continuing by looking for "Track type: audio"
-            if re.search('Track type: audio', track):
-                # Loop through list of lines for current track and save data
-                track_object = {}
-                for line in track:
-                    # Split line on ": " and save as key and value, removing leading and trailing whitespace along with characters before "+ " on the key
-                    track_object[line.split(': ')[0].split('+ ')[1].strip()] = line.split(': ')[1].strip()
-                # Check if track is named correctly
-                # Determing what correct track name should be based off of codec, channels, and bitrate (if available)
-                # Example track name: "AC3 5.1" or "DTS-HD MA 7.1"
-                # Determine channel value
-                if track_object['Channels'] == '6':
-                    channel = '5.1'
-                elif track_object['Channels'] == '8':
-                    channel = '7.1'
-                elif track_object['Channels'] == '3':
-                    channel = '2.1'
-                elif track_object['Channels'] == '2':
-                    channel = 'Stereo'
-                elif track_object['Channels'] == '1':
-                    channel = 'Mono'
+    # Loop through audio tracks
+    for track in output['media']['track']:
+        # Determine if track is an audio track
+        if track['@type'] == 'Audio':
+            # Determine if track name is correct
+            # Track name should be in the format: Codec Channels(.1) Codec Name
+            # Example: DTS-HD MA 5.1, AC3 2.1 Dolby Surround, AAC Stereo
+            # Determine track name codec portion
+            # Strip leading A_ from CodecID and if codec contains AAC then codec name = AAC
+            track_name_codec = track['CodecID'].replace('A_', '')
+            if 'AAC' in track_name_codec:
+                track_name_codec = 'AAC'
+            # Determine channels
+            if track['Channels'] == '2':
+                # if Codec AAC then channels = Stereo, else channels = 2.0
+                if 'AAC' in track['CodecID']:
+                    channels = 'Stereo'
                 else:
-                    channel = 'Unknown'
-                if track_object['Codec ID'].startswith('A_DTS'):
-                    # Check if track has bitrate to determine if it is DTS or DTS-HD MA
-                    if 'Bit depth' in track_object:
-                        pass
-                correct_track_name = track_object['Codec ID'].split('_')[1].strip() + ' ' + channel
-                # Check if track name is correct
-                if track_object['Name'] != correct_track_name:
-                    # Run mkvpropedit to set track name
-                    print('Setting track name: ' + file + ' - ' + track_object['Name'] + ' - ' + correct_track_name)
-                    mkvpropedit_track_name = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'track:a' + track_object['Track number'], '--set', 'name=' + correct_track_name], stdout=subprocess.PIPE)
-                    # Wait for mkvpropedit to finish
-                    mkvpropedit_track_name.wait()
-                    # # Read output from mkvpropedit and convert from bytes to string
-                    mkvpropedit_track_name_output = mkvpropedit_track_name.stdout.read().decode('utf-8')
-                    if 'Done.' in mkvpropedit_track_name_output:
-                        print('Done.')
-                    else:
-                        print('Error: ' + mkvpropedit_track_name_output)
+                    channels = '2.0'
+            elif track['Channels'] == '1':
+                channels = 'Mono'
+            else:
+                channels = str(int(track['Channels']) -1) + '.1'
+            # Determine if track name is correct
+            track_name = track_name_codec + ' ' + channels
+            print(track_name)
+            if track['Title'] == track_name:
+                pass
+            else:
+                print('Setting track name: ' + file + ' Track: ' + track['ID'] + ' Name: ' + track_name)
+                # Run mkvpropedit to set track name
+                mkvpropedit_track_name = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'track:' + track['ID'], '--set', 'name=' + track_name], stdout=subprocess.PIPE)
+                # Wait for mkvpropedit to finish
+                mkvpropedit_track_name.wait()
+                # # Read output from mkvpropedit and convert from bytes to string
+                mkvpropedit_track_name_output = mkvpropedit_track_name.stdout.read().decode('utf-8')
+                if 'Done.' in mkvpropedit_track_name_output:
+                    print('Done.')
+                else:
+                    print('Error: ' + mkvpropedit_track_name_output)
+    # Move file to destination location on another share
+    print('Moving file: ' + file)
+    if is_tv:
+        # Verify show directory exists and create if it does not
+        if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0]):
+            os.mkdir(dest_dir_tv + '/' + title.split(':')[0])
+            # Get season number from file name section SxxEyy and extract xx
+            season = file.split(' - ')[1].split('E')[0].replace('S', '')
+            # Verify season directory exists and create if it does not
+            if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season):
+                os.mkdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season)
+                # Set destination directory to show/season directory
+                dest_dir_tv = dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season
+        # Move file to destination location
+        print(dest_dir_tv + '/' + file)
+        # os.shutil.move(search_dir + '/' + file, dest_dir_tv + '/' + file)
+    else:
+        # os.shutil.move(search_dir + '/' + file, dest_dir + '/' + file)
+        pass
