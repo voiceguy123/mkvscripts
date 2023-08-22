@@ -21,7 +21,7 @@ RUN sed -i 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid
 EXPOSE 22
 
 # Setup Volume
-VOLUME ["/storage/Handbrake", "/storage/Media_DVD_Movies", "/storage/Media_DVD_Series"]
+VOLUME ["/storage/Handbrake", "/storage/Media_DVD_Movies", "/storage/Media_DVD_Series", "/storage/Converted_Rips"]
 
 # set entrypoint
 CMD ["/usr/sbin/sshd", "-D"]

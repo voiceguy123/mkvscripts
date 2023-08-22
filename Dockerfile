@@ -14,7 +14,7 @@ RUN apt-get update
 RUN apt-get install -y mkvtoolnix mediainfo cron
 
 # Setup Volume
-VOLUME ["/storage/Handbrake", "/storage/Media_DVD_Movies", "/storage/Media_DVD_Series"]
+VOLUME ["/storage/Handbrake", "/storage/Media_DVD_Movies", "/storage/Media_DVD_Series", "/storage/Converted_Rips"]
 
 # set entrypoint
 CMD ["cron", "-f"]
