@@ -16,9 +16,7 @@ import subprocess
 import re
 import time
 import json
-
-# MKVtoolnix location
-mkvtoolnix = '/usr/bin/'
+import shutil
 
 # Search location
 search_dir = '/storage/Handbrake/Output/DVD'
@@ -32,37 +30,29 @@ dest_dir_tv = '/storage/Media_DVD_Series'
 # Location of Converted Source files
 rip_dest_dir = '/storage/Converted_Rips'
 
-# Location of DVD rips
-rip_source_dir = '/storage/Handbrake/Rips/DVD'
-
 # Seach through list of files and remove any that are not .mkv and any that are still being written to
 # by comparing the file size to the size of the file 30 seconds ago
-potential_files = []
-# Loop through list of files from search location, save potential files to list as (file, size)
-for file in os.listdir(search_dir):
-    if file.endswith('.mkv'):
-        potential_files.append((file, os.path.getsize(search_dir + '/' + file)))
-# wait 30 seconds
-time.sleep(30)
-file_list = []
-# Loop through list of potential files, skipping any that are still being written to
-# adding any that are still the same size to the list of valid files
-for file in potential_files:
-    if file[1] != os.path.getsize(search_dir + '/' + file[0]):
-        print('File still being written to: ' + file[0])
-    else:
-        file_list.append(file[0])
+def validate_files(search_directory):
+    potential_files = []
+    # Loop through list of files from search location, save potential files to list as (file, size)
+    for file in os.listdir(search_directory):
+        if file.endswith('.mkv'):
+            potential_files.append((file, os.path.getsize(search_directory + '/' + file)))
+    # wait 30 seconds
+    time.sleep(30)
+    file_list = []
+    # Loop through list of potential files, skipping any that are still being written to
+    # adding any that are still the same size to the list of valid files
+    for file in potential_files:
+        if file[1] != os.path.getsize(search_directory + '/' + file[0]):
+            print('File still being written to: ' + file[0])
+        else:
+            file_list.append(file[0])
+    return file_list
 
-# Loop through list of valid files
-for file in file_list:
-    # Run mediainfo on file
-    mediainfo = subprocess.Popen([mkvtoolnix + 'mediainfo', search_dir + '/' + file, '--Output=JSON'], stdout=subprocess.PIPE)
-    # Read output from mediainfo and convert from bytes to string and save JSON to variable
-    # Convert JSON to dictionary
-    output = json.loads(mediainfo.stdout.read().decode('utf-8'))
-    ### Subtitle section ###
-    # Search output for S_VOBSUB tracks
-    for track in output['media']['track']:
+# Search output for S_VOBSUB tracks
+def check_set_forced_subtitles(filename='', search_directory='', tracks=[]):
+    for track in tracks:
         if track['@type'] == 'Text' and track['CodecID'] == 'S_VOBSUB':
             # Determine if current subtitle track is the default track and forced display
             if track['Default'] == 'Yes' and track['Forced'] == 'Yes':
@@ -70,7 +60,7 @@ for file in file_list:
                 # Run mkvpropedit to remove forced flags
                 print('Forced subtitles found: ' + file)
                 # Use track number instead of track name from mediainfo, track number is more reliable
-                mkvpropedit_subtitles = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'track:' + track['ID'], '--set', 'flag-forced=0', '--set', 'flag-default=0'], stdout=subprocess.PIPE)
+                mkvpropedit_subtitles = subprocess.Popen(['/usr/bin/mkvpropedit', search_directory + '/' + filename, '--edit', 'track:' + track['ID'], '--set', 'flag-forced=0', '--set', 'flag-default=0'], stdout=subprocess.PIPE)
                 # Wait for mkvpropedit to finish
                 mkvpropedit_subtitles.wait()
                 # # Read output from mkvpropedit and convert from bytes to string
@@ -79,24 +69,25 @@ for file in file_list:
                     print('Done.')
                 else:
                     print('Error: ' + mkvpropedit_subtitles_output)
-    ### Title section ###
+
+def check_set_title(filename='', search_directory='', track0={}):
     # Determine if file is a movie or a TV show by looking for the pattern SxxExx to determine full title
-    if re.search('S\d\dE\d\d', file):
+    if re.search('S\d\dE\d\d', filename):
         # Split file name into parts on ' - ' and remove extension, save 1st and 3rd parts as Show: Episode Name
         # Set title
-        title = file.split(' - ')[0] + ': ' + file.split(' - ')[2].split('.')[0]
+        title = filename.split(' - ')[0] + ': ' + filename.split(' - ')[2].split('.')[0]
         is_tv = True
     else:
         # Split file name into parts on ' - ' and remove extension, save 1st part as title
-        title = file.split(' - ')[0].split('.')[0]
+        title = filename.split(' - ')[0].split('.')[0]
         is_tv = False
     # Determine if Title property exists and is correct
-    if 'Title' in output['media']['track'][0] and output['media']['track'][0]['Title'] == title:
+    if 'Title' in track0 and track0['Title'] == title:
         pass
     else:
-        print('Setting title: ' + file)
+        print('Setting title: ' + filename)
         # Run mkvpropedit to set title
-        mkvpropedit_title = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'info', '--set', 'title=' + title], stdout=subprocess.PIPE)
+        mkvpropedit_title = subprocess.Popen(['/usr/bin/mkvpropedit', search_directory + '/' + filename, '--edit', 'info', '--set', 'title=' + title], stdout=subprocess.PIPE)
         # Wait for mkvpropedit to finish
         mkvpropedit_title.wait()
         # # Read output from mkvpropedit and convert from bytes to string
@@ -105,9 +96,11 @@ for file in file_list:
             print('Done.')
         else:
             print('Error: ' + mkvpropedit_title_output)
-    ### Audio Track section ###
+    return is_tv, title
+
+def check_set_audio_tracks(filename='', search_directory='', tracks=[]):
     # Loop through audio tracks
-    for track in output['media']['track']:
+    for track in tracks:
         # Determine if track is an audio track
         if track['@type'] == 'Audio':
             # Determine if track name is correct
@@ -137,7 +130,7 @@ for file in file_list:
             else:
                 print('Setting track name: ' + file + ' Track: ' + track['ID'] + ' Name: ' + track_name)
                 # Run mkvpropedit to set track name
-                mkvpropedit_track_name = subprocess.Popen([mkvtoolnix + 'mkvpropedit', search_dir + '/' + file, '--edit', 'track:' + track['ID'], '--set', 'name=' + track_name], stdout=subprocess.PIPE)
+                mkvpropedit_track_name = subprocess.Popen(['/usr/bin/mkvpropedit', search_directory + '/' + filename, '--edit', 'track:' + track['ID'], '--set', 'name=' + track_name], stdout=subprocess.PIPE)
                 # Wait for mkvpropedit to finish
                 mkvpropedit_track_name.wait()
                 # # Read output from mkvpropedit and convert from bytes to string
@@ -146,22 +139,44 @@ for file in file_list:
                     print('Done.')
                 else:
                     print('Error: ' + mkvpropedit_track_name_output)
-    # Move file to destination location on another share
-    print('Moving file: ' + file)
+
+def move_file(filename='', is_tv=False, title=''):
+    print('Moving file: ' + filename)
     if is_tv:
+        # Get season number from file name section SxxEyy and extract xx, strip leading 0 on season number if present
+        season_num = filename.split(' - ')[1].split('E')[0].replace('S', '').lstrip('0')
         # Verify show directory exists and create if it does not
         if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0]):
             os.mkdir(dest_dir_tv + '/' + title.split(':')[0])
-            # Get season number from file name section SxxEyy and extract xx
-            season = file.split(' - ')[1].split('E')[0].replace('S', '')
-            # Verify season directory exists and create if it does not
-            if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season):
-                os.mkdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season)
-                # Set destination directory to show/season directory
-                dest_dir_tv = dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season
+        # Verify season directory exists and create if it does not
+        if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season_num):
+            os.mkdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season_num)
+            # Set destination directory to show/season directory
+            dest_dir_tv = dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season_num
         # Move file to destination location
-        print(dest_dir_tv + '/' + file)
-        os.shutil.move(search_dir + '/' + file, dest_dir_tv + '/' + file)
+        print(dest_dir_tv + '/' + filename)
+        shutil.move(search_dir + '/' + filename, dest_dir_tv + '/' + filename)
     else:
-        os.shutil.move(search_dir + '/' + file, dest_dir + '/' + file)
-        pass
+        shutil.move(search_dir + '/' + filename, dest_dir + '/' + filename)
+
+# Get list of valid files
+file_list = validate_files(search_dir)
+
+# Loop through list of valid files
+for file in file_list:
+    # Run mediainfo on file
+    mediainfo = subprocess.Popen(['/usr/bin/mediainfo', search_dir + '/' + file, '--Output=JSON'], stdout=subprocess.PIPE)
+    # Read output from mediainfo and convert from bytes to string and save JSON to variable
+    # Convert JSON to dictionary
+    output = json.loads(mediainfo.stdout.read().decode('utf-8'))
+    ### Subtitle section ###
+    # Search for forced subtitles
+    check_set_forced_subtitles(tracks=output['media']['track'], filename=file, search_directory=search_dir)
+    ### Title section ###
+    # Check title
+    is_tv, title = check_set_title(filename=file, search_directory=search_dir, track0=output['media']['track'][0])
+    ### Audio Track section ###
+    # Check audio tracks
+    check_set_audio_tracks(tracks=output['media']['track'], search_directory=search_dir, filename=file)
+    # Move file to destination location on another share
+    move_file(filename=file, is_tv=is_tv, title=title)
