@@ -21,13 +21,19 @@ import json
 mkvtoolnix = '/usr/bin/'
 
 # Search location
-search_dir = '/storage/Output/DVD'
+search_dir = '/storage/Handbrake/Output/DVD'
 
 # Destination location for movies
 dest_dir = '/storage/Media_DVD_Movies'
 
 # Destination location for TV shows
 dest_dir_tv = '/storage/Media_DVD_Series'
+
+# Location of Converted Source files
+rip_dest_dir = '/storage/Converted_Rips'
+
+# Location of DVD rips
+rip_source_dir = '/storage/Handbrake/Rips/DVD'
 
 # Seach through list of files and remove any that are not .mkv and any that are still being written to
 # by comparing the file size to the size of the file 30 seconds ago
@@ -155,7 +161,7 @@ for file in file_list:
                 dest_dir_tv = dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season
         # Move file to destination location
         print(dest_dir_tv + '/' + file)
-        # os.shutil.move(search_dir + '/' + file, dest_dir_tv + '/' + file)
+        os.shutil.move(search_dir + '/' + file, dest_dir_tv + '/' + file)
     else:
-        # os.shutil.move(search_dir + '/' + file, dest_dir + '/' + file)
+        os.shutil.move(search_dir + '/' + file, dest_dir + '/' + file)
         pass
