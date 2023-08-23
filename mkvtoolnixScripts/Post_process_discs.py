@@ -19,7 +19,11 @@ import json
 import shutil
 
 # Search location
-search_root = '/storage/Handbrake/Output/'
+HB_Output_root = '/storage/Handbrake/Output/'
+# Source root
+rips_source_root = '/storage/Handbrake/Rips/'
+# Converted rips root
+converted_rips_root = '/storage/Converted_Rips/'
 # Destination root
 dest_root = '/storage/Media_'
 # Handbrake config/log directory
@@ -48,7 +52,7 @@ def validate_files(search_directory):
     return file_list
 
 # Search output for S_VOBSUB tracks
-def check_set_forced_subtitles(filename='', search_directory='', tracks=[]):
+def check_set_forced_subtitles(path_filename='', tracks=[]):
     for track in tracks:
         if track['@type'] == 'Text' and track['CodecID'] == 'S_VOBSUB':
             # Determine if current subtitle track is the default track and forced display
@@ -57,7 +61,7 @@ def check_set_forced_subtitles(filename='', search_directory='', tracks=[]):
                 # Run mkvpropedit to remove forced flags
                 print('Removing forced subtitles found: ' + file, end='')
                 # Use track number instead of track name from mediainfo, track number is more reliable
-                mkvpropedit_subtitles = subprocess.Popen(['/usr/bin/mkvpropedit', search_directory + '/' + filename, '--edit', 'track:' + track['ID'], '--set', 'flag-forced=0', '--set', 'flag-default=0'], stdout=subprocess.PIPE)
+                mkvpropedit_subtitles = subprocess.Popen(['/usr/bin/mkvpropedit', path_filename, '--edit', 'track:' + track['ID'], '--set', 'flag-forced=0', '--set', 'flag-default=0'], stdout=subprocess.PIPE)
                 # Wait for mkvpropedit to finish
                 mkvpropedit_subtitles.wait()
                 # # Read output from mkvpropedit and convert from bytes to string
@@ -67,7 +71,9 @@ def check_set_forced_subtitles(filename='', search_directory='', tracks=[]):
                 else:
                     print(' Error: ' + mkvpropedit_subtitles_output)
 
-def check_set_title(filename='', search_directory='', track0={}):
+def check_set_title(path_filename='', track0={}):
+    # Get file name from path_filename
+    filename = path_filename.split('/')[-1]
     # Determine if file is a movie or a TV show by looking for the pattern SxxExx to determine full title
     if re.search('S\d\dE\d\d', filename):
         # Split file name into parts on ' - ' and remove extension, save 1st and 3rd parts as Show: Episode Name
@@ -84,7 +90,7 @@ def check_set_title(filename='', search_directory='', track0={}):
     else:
         print('Setting title: ' + title, end='')
         # Run mkvpropedit to set title
-        mkvpropedit_title = subprocess.Popen(['/usr/bin/mkvpropedit', search_directory + '/' + filename, '--edit', 'info', '--set', 'title=' + title], stdout=subprocess.PIPE)
+        mkvpropedit_title = subprocess.Popen(['/usr/bin/mkvpropedit', path_filename, '--edit', 'info', '--set', 'title=' + title], stdout=subprocess.PIPE)
         # Wait for mkvpropedit to finish
         mkvpropedit_title.wait()
         # # Read output from mkvpropedit and convert from bytes to string
@@ -95,7 +101,7 @@ def check_set_title(filename='', search_directory='', track0={}):
             print(' Error: ' + mkvpropedit_title_output)
     return is_tv, title
 
-def check_set_audio_tracks(filename='', search_directory='', tracks=[]):
+def check_set_audio_tracks(path_filename='', tracks=[]):
     # Loop through audio tracks
     for track in tracks:
         # Determine if track is an audio track
@@ -131,7 +137,7 @@ def check_set_audio_tracks(filename='', search_directory='', tracks=[]):
             else:
                 print('Setting track name for track#: ' + track['ID'] + ' Name: ' + track_name, end='')
                 # Run mkvpropedit to set track name
-                mkvpropedit_track_name = subprocess.Popen(['/usr/bin/mkvpropedit', search_directory + '/' + filename, '--edit', 'track:' + track['ID'], '--set', 'name=' + track_name], stdout=subprocess.PIPE)
+                mkvpropedit_track_name = subprocess.Popen(['/usr/bin/mkvpropedit', path_filename, '--edit', 'track:' + track['ID'], '--set', 'name=' + track_name], stdout=subprocess.PIPE)
                 # Wait for mkvpropedit to finish
                 mkvpropedit_track_name.wait()
                 # # Read output from mkvpropedit and convert from bytes to string
@@ -141,7 +147,7 @@ def check_set_audio_tracks(filename='', search_directory='', tracks=[]):
                 else:
                     print(' Error: ' + mkvpropedit_track_name_output)
 
-def move_file(filename='', is_tv=False, title='', dest_dir=''):
+def move_file(filename='', is_tv=False, title='', source_dir='', dest_dir=''):
     if is_tv:
         # Get season number from file name section SxxEyy and extract xx, strip leading 0 on season number if present
         show_name = title.split(':')[0]
@@ -156,34 +162,100 @@ def move_file(filename='', is_tv=False, title='', dest_dir=''):
             dest_dir = dest_dir + '/' + show_name + '/Season ' + season_num
     # Move file to destination location
     print('Moving file: ' + filename + ' to: ' + dest_dir + '/' + filename, end='')
-    shutil.move(search_dir + '/' + filename, dest_dir + '/' + filename)
+    shutil.move(source_dir + '/' + filename, dest_dir + '/' + filename)
     print(' Done.')
 
+def move_source_file(filename='', dest_dir=''):
+    # Move file to Converted_Rips directory for final storage
+    # Add any missing parent directories
+    if not os.path.isdir(dest_dir):
+        os.makedirs(dest_dir)
+    # Move file to destination location
+    # Set destination filename by stripping source directory from filename
+    dest_filename_w_path = dest_dir + '/' + filename.split('/')[-1]
+    print('Moving file: ' + filename + ' to: ' + dest_filename_w_path, end='') 
+    shutil.move(filename, dest_filename_w_path)
+    print(' Done.')
+
+def get_handbrake_log(search_directory=''):
+    # Get handbrake log file from search directory
+    # File name format Activity.log.x
+    # Get list of files in search directory
+    file_list = os.listdir(search_directory)
+    # Loop through list of files and find the handbrake log file
+    for file in file_list:
+        if 'Activity' in file:
+            hb_log = file
+    return hb_log
+
+def get_json_from_hb_log(hb_log=''):
+    # Read handbrake log file and convert to JSON sections for each title
+    # Save JSON sections to list
+    json_list = []
+    # Open handbrake log file
+    with open(hb_dir + hb_log, 'r') as hb_log_file:
+        # Read handbrake log file
+        hb_log_file_contents = hb_log_file.read()
+        # Split handbrake log file into sections for each title
+        hb_log_file_contents_split = hb_log_file_contents.split('json job:\n')
+        # Remove first section of handbrake log file
+        hb_log_file_contents_split.pop(0)
+        # Loop through list of sections and convert to JSON
+        for section in hb_log_file_contents_split:
+            temp_json_data = []
+            for line in section.split('\n'):
+                # if timestamp in line then break out of loop otherwise add line to temp_json_data
+                # timestamp is in the format at the beginning of the line: [00:00:00]
+                if re.search('^\[\d\d:\d\d:\d\d\]', line):
+                    break
+                else:
+                    temp_json_data.append(line)
+            json_list.append(json.loads('\n'.join(temp_json_data)))
+    return json_list
+
+def get_json_from_title_and_filename(json_list=[], title='', filename=''):
+    # Loop through list of JSON sections and get title
+    for json_section in json_list:
+        # Get title from JSON section
+        if json_section['Metadata']['Name'] == title:
+            # Check if filename matches
+            if json_section['Destination']['File'].split('/')[-1] == filename:
+                return json_section
+
+# Get handbrake log file
+hb_log = get_handbrake_log(search_directory=hb_dir)
+# Get JSON from handbrake log file
+json_list = get_json_from_hb_log(hb_log=hb_log)
 
 # Process files for each disc type
 for disc_type in disc_types:
     # Search location
-    search_dir = search_root + disc_type
+    search_dir = HB_Output_root + disc_type
     # Get list of valid files
     file_list = validate_files(search_dir)
     #
     # Loop through list of valid files
     for file in file_list:
+        # Set output filename as source file with full path
+        output_filename = search_dir + '/' + file
         # Run mediainfo on file
         print('Running mediainfo on file: ' + file)
-        mediainfo = subprocess.Popen(['/usr/bin/mediainfo', search_dir + '/' + file, '--Output=JSON'], stdout=subprocess.PIPE)
+        mediainfo = subprocess.Popen(['/usr/bin/mediainfo', output_filename, '--Output=JSON'], stdout=subprocess.PIPE)
         # Read output from mediainfo and convert from bytes to string and save JSON to variable
         # Convert JSON to dictionary
         output = json.loads(mediainfo.stdout.read().decode('utf-8'))
+        # Get title from JSON
+        hb_json_job = get_json_from_title_and_filename(json_list=json_list, title=output['media']['track'][0]['Title'], filename=file)
+        
         ### Subtitle section ###
         # Search for forced subtitles
-        check_set_forced_subtitles(tracks=output['media']['track'], filename=file, search_directory=search_dir)
+        check_set_forced_subtitles(path_filename=output_filename, tracks=output['media']['track'])
         ### Title section ###
         # Check title
-        is_tv, title = check_set_title(filename=file, search_directory=search_dir, track0=output['media']['track'][0])
+        is_tv, title = check_set_title(path_filename=output_filename, track0=output['media']['track'][0])
         ### Audio Track section ###
         # Check audio tracks
-        check_set_audio_tracks(tracks=output['media']['track'], search_directory=search_dir, filename=file)
+        check_set_audio_tracks(path_filename=output_filename, tracks=output['media']['track'])
         ## Move file section ##
         # Determine destination location
         if is_tv:
@@ -191,4 +263,19 @@ for disc_type in disc_types:
         else:
             dest_dir = dest_root + disc_type + '_Movies'
         # Move file to destination location on another share
-        move_file(filename=file, is_tv=is_tv, title=title, dest_dir=dest_dir)
+        move_file(filename=file, is_tv=is_tv, title=title, dest_dir=dest_dir, source_dir=search_dir)
+        # Determine storage location
+        if is_tv:
+            pass
+        else:
+            # Get subdirectory
+            sub_dir = hb_json_job['Source']['Path'].split(disc_type)[1].split('/')[1]
+            # Determine source file location, source file is the file that was ripped
+            # Source file is in the format: /storage/Handbrake/Rips/DVD/Title/Title.mkv
+            # stored in hb_json_job['Source']['path'], split on / and get last item
+            source_file = rips_source_root + disc_type + '/' + sub_dir + '/' + hb_json_job['Source']['Path'].split('/')[-1]
+            # Move source file to Converted_Rips directory
+            move_source_file(filename=source_file, dest_dir=converted_rips_root + disc_type+ '/' + sub_dir)
+            # if remove subdirectory from source folder if empty
+            if not os.listdir(rips_source_root + disc_type + sub_dir):
+                os.rmdir(rips_source_root + disc_type + sub_dir)
