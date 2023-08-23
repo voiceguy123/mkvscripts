@@ -19,16 +19,12 @@ import json
 import shutil
 
 # Search location
-search_dir = '/storage/Handbrake/Output/DVD'
+search_root = '/storage/Handbrake/Output/'
+# Destination root
+dest_root = '/storage/Media_'
 
-# Destination location for movies
-dest_dir = '/storage/Media_DVD_Movies'
-
-# Destination location for TV shows
-dest_dir_tv = '/storage/Media_DVD_Series'
-
-# Location of Converted Source files
-rip_dest_dir = '/storage/Converted_Rips'
+# Disc types
+disc_types = ['DVD', 'BD', 'UHD']
 
 # Seach through list of files and remove any that are not .mkv and any that are still being written to
 # by comparing the file size to the size of the file 30 seconds ago
@@ -111,6 +107,11 @@ def check_set_audio_tracks(filename='', search_directory='', tracks=[]):
             track_name_codec = track['CodecID'].replace('A_', '')
             if 'AAC' in track_name_codec:
                 track_name_codec = 'AAC'
+            elif 'DTS' in track_name_codec:
+                if 'Format_Commercial_IfAny' in track and 'DTS-HD Master Audio' in track['Format_Commercial_IfAny']:
+                    track_name_codec = 'DTS-HD MA'
+                else:
+                    track_name_codec = 'DTS'
             # Determine channels
             if track['Channels'] == '2':
                 # if Codec AAC then channels = Stereo, else channels = 2.0
@@ -140,43 +141,56 @@ def check_set_audio_tracks(filename='', search_directory='', tracks=[]):
                 else:
                     print('Error: ' + mkvpropedit_track_name_output)
 
-def move_file(filename='', is_tv=False, title=''):
+def move_file(filename='', is_tv=False, title='', dest_dir=''):
     print('Moving file: ' + filename)
     if is_tv:
         # Get season number from file name section SxxEyy and extract xx, strip leading 0 on season number if present
+        show_name = title.split(':')[0]
         season_num = filename.split(' - ')[1].split('E')[0].replace('S', '').lstrip('0')
         # Verify show directory exists and create if it does not
-        if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0]):
-            os.mkdir(dest_dir_tv + '/' + title.split(':')[0])
+        if not os.path.isdir(dest_dir + '/' + show_name):
+            os.mkdir(dest_dir + '/' + show_name)
         # Verify season directory exists and create if it does not
-        if not os.path.isdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season_num):
-            os.mkdir(dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season_num)
+        if not os.path.isdir(dest_dir + '/' + show_name + '/Season ' + season_num):
+            os.mkdir(dest_dir + '/' + show_name + '/Season ' + season_num)
             # Set destination directory to show/season directory
-            dest_dir_tv = dest_dir_tv + '/' + title.split(':')[0] + '/Season ' + season_num
+            dest_dir = dest_dir + '/' + show_name + '/Season ' + season_num
         # Move file to destination location
-        print(dest_dir_tv + '/' + filename)
-        shutil.move(search_dir + '/' + filename, dest_dir_tv + '/' + filename)
+        print(dest_dir + '/' + filename)
+        shutil.move(search_dir + '/' + filename, dest_dir + '/' + filename)
     else:
+        print(dest_dir + '/' + filename)
         shutil.move(search_dir + '/' + filename, dest_dir + '/' + filename)
 
-# Get list of valid files
-file_list = validate_files(search_dir)
 
-# Loop through list of valid files
-for file in file_list:
-    # Run mediainfo on file
-    mediainfo = subprocess.Popen(['/usr/bin/mediainfo', search_dir + '/' + file, '--Output=JSON'], stdout=subprocess.PIPE)
-    # Read output from mediainfo and convert from bytes to string and save JSON to variable
-    # Convert JSON to dictionary
-    output = json.loads(mediainfo.stdout.read().decode('utf-8'))
-    ### Subtitle section ###
-    # Search for forced subtitles
-    check_set_forced_subtitles(tracks=output['media']['track'], filename=file, search_directory=search_dir)
-    ### Title section ###
-    # Check title
-    is_tv, title = check_set_title(filename=file, search_directory=search_dir, track0=output['media']['track'][0])
-    ### Audio Track section ###
-    # Check audio tracks
-    check_set_audio_tracks(tracks=output['media']['track'], search_directory=search_dir, filename=file)
-    # Move file to destination location on another share
-    move_file(filename=file, is_tv=is_tv, title=title)
+# Process files for each disc type
+for disc_type in disc_types:
+    # Search location
+    search_dir = search_root + disc_type
+    # Get list of valid files
+    file_list = validate_files(search_dir)
+    #
+    # Loop through list of valid files
+    for file in file_list:
+        # Run mediainfo on file
+        mediainfo = subprocess.Popen(['/usr/bin/mediainfo', search_dir + '/' + file, '--Output=JSON'], stdout=subprocess.PIPE)
+        # Read output from mediainfo and convert from bytes to string and save JSON to variable
+        # Convert JSON to dictionary
+        output = json.loads(mediainfo.stdout.read().decode('utf-8'))
+        ### Subtitle section ###
+        # Search for forced subtitles
+        check_set_forced_subtitles(tracks=output['media']['track'], filename=file, search_directory=search_dir)
+        ### Title section ###
+        # Check title
+        is_tv, title = check_set_title(filename=file, search_directory=search_dir, track0=output['media']['track'][0])
+        ### Audio Track section ###
+        # Check audio tracks
+        check_set_audio_tracks(tracks=output['media']['track'], search_directory=search_dir, filename=file)
+        ## Move file section ##
+        # Determine destination location
+        if is_tv:
+            dest_dir = dest_root + disc_type + '_Series'
+        else:
+            dest_dir = dest_root + disc_type + '_Movies'
+        # Move file to destination location on another share
+        move_file(filename=file, is_tv=is_tv, title=title, dest_dir=dest_dir)
