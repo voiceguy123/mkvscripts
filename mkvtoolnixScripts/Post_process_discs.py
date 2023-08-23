@@ -213,14 +213,14 @@ def get_json_from_hb_log(hb_log=''):
             json_list.append(json.loads('\n'.join(temp_json_data)))
     return json_list
 
-def get_json_from_title_and_filename(json_list=[], title='', filename=''):
+def get_json_from_filename(json_list=[], filename=''):
     # Loop through list of JSON sections and get title
+    most_recent_json = {}
     for json_section in json_list:
-        # Get title from JSON section
-        if json_section['Metadata']['Name'] == title:
-            # Check if filename matches
-            if json_section['Destination']['File'].split('/')[-1] == filename:
-                return json_section
+        # Check if filename matches
+        if json_section['Destination']['File'].split('/')[-1] == filename:
+            most_recent_json = json_section
+    return most_recent_json
 
 # Get handbrake log file
 hb_log = get_handbrake_log(search_directory=hb_dir)
@@ -245,8 +245,10 @@ for disc_type in disc_types:
         # Convert JSON to dictionary
         output = json.loads(mediainfo.stdout.read().decode('utf-8'))
         # Get title from JSON
-        hb_json_job = get_json_from_title_and_filename(json_list=json_list, title=output['media']['track'][0]['Title'], filename=file)
-        
+        hb_json_job = get_json_from_filename(json_list=json_list, filename=file)
+        if hb_json_job == {}:
+            # Raise error if no JSON found
+            raise Exception('No JSON found for file: ' + file)
         ### Subtitle section ###
         # Search for forced subtitles
         check_set_forced_subtitles(path_filename=output_filename, tracks=output['media']['track'])
@@ -277,5 +279,5 @@ for disc_type in disc_types:
             # Move source file to Converted_Rips directory
             move_source_file(filename=source_file, dest_dir=converted_rips_root + disc_type+ '/' + sub_dir)
             # if remove subdirectory from source folder if empty
-            if not os.listdir(rips_source_root + disc_type + sub_dir):
-                os.rmdir(rips_source_root + disc_type + sub_dir)
+            if not os.listdir(rips_source_root + disc_type + '/' + sub_dir):
+                os.rmdir(rips_source_root + disc_type + '/' + sub_dir)
