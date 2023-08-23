@@ -22,6 +22,7 @@ EXPOSE 22
 
 # Setup Volume
 VOLUME ["/storage/Handbrake", "/storage/Media_DVD_Movies", "/storage/Media_DVD_Series", "/storage/Media_BD_Movies", "/storage/Media_BD_Series"]
+VOLUME ["/storage/Handbrake_cfg"]
 
 # set entrypoint
 CMD ["/usr/sbin/sshd", "-D"]
